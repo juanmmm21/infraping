@@ -1,0 +1,46 @@
+# InfraPing on Cloudflare Workers: example configuration.
+# Copy it to infraping.yaml (next to this file) and adapt it. It is the same format as the
+# binary's, minus what Workers cannot do: no tls checks, no custom DNS resolver, no skip_tls_verify.
+# Secrets come from `wrangler secret put NAME` and are referenced as ${NAME}.
+
+defaults:
+  interval: 1m           # the cron runs every minute, so 1m is the minimum
+  timeout: 10s
+  failure_threshold: 2
+  recovery_threshold: 1
+
+status_page:
+  title: "Example status"
+
+notifiers:
+  - name: phone
+    type: telegram
+    token: ${TELEGRAM_BOT_TOKEN}
+    chat_id: ${TELEGRAM_CHAT_ID}
+
+  - name: push
+    type: ntfy
+    topic: ${NTFY_TOPIC}
+
+checks:
+  - name: Website
+    type: http
+    url: https://example.com
+    contains: "Example Domain"
+    max_latency: 2s
+
+  - name: API health
+    type: http
+    url: https://api.example.com/healthz
+    expect_status: [200]
+    interval: 5m
+    notify: [phone]
+
+  - name: SSH
+    type: tcp
+    address: example.com:22
+    public: false            # watched and alerted, but hidden from the status page
+
+  - name: DNS
+    type: dns
+    host: example.com
