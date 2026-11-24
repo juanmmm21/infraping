@@ -113,6 +113,15 @@ DOWN    Database         0s       connect 127.0.0.1:5432: dial tcp 127.0.0.1:543
 
 The config path can also come from `$INFRAPING_CONFIG`.
 
+### Reloading the configuration
+
+Send `SIGHUP` to apply an edited file without stopping the process (`kill -HUP <pid>`, or `docker kill -s HUP infraping`). The new file is validated first; if it has an error, InfraPing logs it and keeps running with the previous configuration. On a successful reload:
+
+- checks, notifiers, defaults and the status page title take effect immediately;
+- checks that keep their name keep their history, and a check that was down stays down, so no duplicate alert is sent;
+- removed checks lose their history;
+- `state_file`, `status_page.enabled` and `status_page.listen` need a restart: a reload logs a warning and keeps the old values.
+
 ## Configuration reference
 
 ### Top level
