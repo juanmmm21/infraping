@@ -151,3 +151,20 @@ func TestFormatPercentAndSparkline(t *testing.T) {
 		t.Error("one sample is not a line")
 	}
 }
+
+func TestUpdateChangesTitleAndEntries(t *testing.T) {
+	store := history.New()
+	store.Record("web", history.Sample{At: now.Add(-time.Minute), OK: true})
+	s := newTestServer(store, "web")
+	s.Update("New title", []Entry{{Name: "web"}, {Name: "api"}})
+	view := s.Build()
+	if view.Title != "New title" {
+		t.Errorf("title = %q", view.Title)
+	}
+	if len(view.Checks) != 2 || view.Checks[1].Name != "api" || view.Checks[1].Status != "unknown" {
+		t.Errorf("checks = %+v", view.Checks)
+	}
+	if view.Overall != "Collecting data" {
+		t.Errorf("overall = %q", view.Overall)
+	}
+}

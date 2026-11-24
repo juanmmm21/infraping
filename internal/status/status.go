@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/juanmmm21/infraping/internal/history"
@@ -70,6 +71,8 @@ const barDays = 90
 
 // Server renders the page from the shared history store.
 type Server struct {
+	// mu protege title y entries, que cambian al recargar la configuración.
+	mu      sync.RWMutex
 	title   string
 	entries []Entry
 	store   *history.Store
@@ -80,6 +83,14 @@ type Server struct {
 // NewServer creates the status page handler.
 func NewServer(title string, entries []Entry, store *history.Store, logger *slog.Logger) *Server {
 	return &Server{title: title, entries: entries, store: store, now: time.Now, logger: logger}
+}
+
+// Update cambia el título y las comprobaciones públicas; se usa al recargar la configuración.
+func (s *Server) Update(title string, entries []Entry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.title = title
+	s.entries = entries
 }
 
 // Handler returns the HTTP routes.
@@ -98,10 +109,13 @@ func (s *Server) Handler() http.Handler {
 
 // Build arma la vista a partir del historial en este instante.
 func (s *Server) Build() View {
+	s.mu.RLock()
+	title, entries := s.title, s.entries
+	s.mu.RUnlock()
 	now := s.now()
-	view := View{Title: s.title, GeneratedAt: now.UTC()}
+	view := View{Title: title, GeneratedAt: now.UTC()}
 	down, unknown := 0, 0
-	for _, e := range s.entries {
+	for _, e := range entries {
 		st, ok := s.store.Get(e.Name)
 		if !ok {
 			st = history.CheckState{Status: "unknown"}
