@@ -86,6 +86,33 @@ checks:
 	}
 }
 
+func TestParseIgnoresEnvInComments(t *testing.T) {
+	_, err := Parse([]byte(`
+# token: ${NOT_SET}
+checks:
+  - name: db   # ${ALSO_NOT_SET}
+    type: tcp
+    address: db:5432
+`), noEnv)
+	if err != nil {
+		t.Fatalf("variables in comments must be ignored: %v", err)
+	}
+}
+
+func TestParseKeepsQuotedNumbersAsStrings(t *testing.T) {
+	cfg, err := Parse([]byte(`
+notifiers:
+  - {name: tg, type: telegram, token: "${T}", chat_id: "${CHAT}"}
+checks: [{name: a, type: tcp, address: "h:1"}]
+`), envOf(map[string]string{"T": "abc", "CHAT": "-100123"}))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Notifiers[0].ChatID != "-100123" {
+		t.Errorf("chat_id = %q", cfg.Notifiers[0].ChatID)
+	}
+}
+
 func TestParseReportsMissingEnv(t *testing.T) {
 	_, err := Parse([]byte(`checks: [{name: a, type: tcp, address: "${HOST}:1"}]`), noEnv)
 	if err == nil || !strings.Contains(err.Error(), "HOST") {

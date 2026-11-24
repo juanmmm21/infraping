@@ -157,20 +157,44 @@ func Parse(raw []byte, lookup func(string) (string, bool)) (*Config, error) {
 	return &cfg, nil
 }
 
-// expandEnv sustituye solo la forma ${VAR}: un "$" suelto en una URL o una contraseña se queda tal cual.
+// expandEnv sustituye solo la forma ${VAR} y solo en los valores: un "$" suelto en una URL se queda tal
+// cual, y una variable mencionada en un comentario no obliga a definirla.
 func expandEnv(raw []byte, lookup func(string) (string, bool)) ([]byte, error) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
 	var missing []string
-	out := envRef.ReplaceAllFunc(raw, func(m []byte) []byte {
-		name := string(envRef.FindSubmatch(m)[1])
-		value, ok := lookup(name)
-		if !ok {
-			missing = append(missing, name)
-			return m
+	changed := false
+	var walk func(n *yaml.Node)
+	walk = func(n *yaml.Node) {
+		if n.Kind == yaml.ScalarNode {
+			n.Value = envRef.ReplaceAllStringFunc(n.Value, func(m string) string {
+				name := envRef.FindStringSubmatch(m)[1]
+				value, ok := lookup(name)
+				if !ok {
+					missing = append(missing, name)
+					return m
+				}
+				changed = true
+				return value
+			})
 		}
-		return []byte(value)
-	})
+		for _, child := range n.Content {
+			walk(child)
+		}
+	}
+	walk(&doc)
 	if len(missing) > 0 {
 		return nil, fmt.Errorf("config references unset environment variables: %s", strings.Join(missing, ", "))
+	}
+	// Sin sustituciones se usa el texto original, para que los errores citen las líneas del fichero real.
+	if !changed {
+		return raw, nil
+	}
+	out, err := yaml.Marshal(&doc)
+	if err != nil {
+		return nil, fmt.Errorf("re-encode config: %w", err)
 	}
 	return out, nil
 }
