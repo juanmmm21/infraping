@@ -115,3 +115,19 @@ func TestLoadRejectsGarbage(t *testing.T) {
 		t.Fatal("want version error")
 	}
 }
+
+func TestRetainDropsRemovedChecks(t *testing.T) {
+	s := New()
+	s.Record("keep", Sample{At: base, OK: true})
+	s.Record("gone", Sample{At: base, OK: false})
+	s.Retain([]string{"keep", "new"})
+	if _, ok := s.Get("keep"); !ok {
+		t.Error("kept check lost its history")
+	}
+	if _, ok := s.Get("gone"); ok {
+		t.Error("removed check still has history")
+	}
+	if _, ok := s.Get("new"); ok {
+		t.Error("Retain must not create entries")
+	}
+}

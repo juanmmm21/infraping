@@ -105,6 +105,21 @@ func (s *Store) SetStatus(name, status string, downSince time.Time, message stri
 	st.Message = message
 }
 
+// Retain borra el historial de las comprobaciones que ya no están en la configuración.
+func (s *Store) Retain(keep []string) {
+	wanted := make(map[string]bool, len(keep))
+	for _, name := range keep {
+		wanted[name] = true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for name := range s.checks {
+		if !wanted[name] {
+			delete(s.checks, name)
+		}
+	}
+}
+
 // Get returns a deep copy of one check's state.
 func (s *Store) Get(name string) (CheckState, bool) {
 	s.mu.RLock()
