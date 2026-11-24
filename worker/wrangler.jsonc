@@ -1,0 +1,11 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "infraping",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  // Cada minuto: es la granularidad mínima de los cron triggers; cada comprobación respeta su interval.
+  "triggers": { "crons": ["* * * * *"] },
+  "rules": [{ "type": "Text", "globs": ["**/*.yaml"], "fallthrough": true }],
+  // Sin database_id: el primer `wrangler deploy` crea la base D1 y escribe aquí su id.
+  "d1_databases": [{ "binding": "DB" }]
+}
