@@ -34,6 +34,7 @@ const usage = `InfraPing — uptime monitoring in a single binary.
 
 Usage:
   infraping run         [-c config.yaml]   watch every check, send alerts, serve the status page
+                                           (SIGHUP reloads the configuration)
   infraping check       [-c config.yaml]   run every check once and exit non-zero if any fails
   infraping validate    [-c config.yaml]   validate the configuration file
   infraping test-notify [-c config.yaml] [-n name]   send a test message to the notifiers
@@ -44,12 +45,17 @@ The config path defaults to $INFRAPING_CONFIG or ./infraping.yaml.
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	code := run(ctx, os.Args[1:], os.Stdout, os.Stderr)
+	// Búfer de 1: varias SIGHUP seguidas mientras se recarga se funden en una sola recarga.
+	reload := make(chan os.Signal, 1)
+	signal.Notify(reload, syscall.SIGHUP)
+	code := run(ctx, os.Args[1:], os.Stdout, os.Stderr, reload)
+	signal.Stop(reload)
 	stop()
 	os.Exit(code)
 }
 
-func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+// run ejecuta la CLI; cada valor que llega por reload hace que «run» vuelva a leer la configuración.
+func run(ctx context.Context, args []string, stdout, stderr io.Writer, reload <-chan os.Signal) int {
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
 		return 2
@@ -92,7 +98,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	case "test-notify":
 		return testNotify(ctx, cfg, *only, stdout, stderr, logger)
 	case "run":
-		if err := serve(ctx, cfg, logger); err != nil {
+		if err := serve(ctx, *path, cfg, reload, logger); err != nil {
 			logger.Error("infraping stopped", "err", err)
 			return 1
 		}
@@ -209,42 +215,99 @@ const (
 	shutdownTimeout = 10 * time.Second
 )
 
-func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
+// generation es todo lo que cambia al recargar: las sondas en marcha y a quién avisan.
+type generation struct {
+	cancel     context.CancelFunc
+	done       chan struct{}
+	dispatcher *notify.Dispatcher
+}
+
+// stop detiene las sondas y espera a que salgan; los avisos ya lanzados siguen en el dispatcher.
+func (g *generation) stop() {
+	g.cancel()
+	<-g.done
+}
+
+// build prepara todo lo que depende de la configuración sin lanzar nada todavía.
+func build(cfg *config.Config) ([]monitor.Target, []notify.Notifier, error) {
 	targets, err := buildTargets(cfg)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	notifiers, err := buildNotifiers(cfg)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
+	return targets, notifiers, nil
+}
+
+func startGeneration(ctx context.Context, targets []monitor.Target, notifiers []notify.Notifier, store *history.Store, logger *slog.Logger) *generation {
+	dispatcher := notify.NewDispatcher(notifiers, logger)
+	runner := monitor.NewRunner(targets, store, dispatcher, logger)
+	runCtx, cancel := context.WithCancel(ctx)
+	g := &generation{cancel: cancel, done: make(chan struct{}), dispatcher: dispatcher}
+	go func() {
+		defer close(g.done)
+		runner.Run(runCtx)
+	}()
+	logger.Info("monitoring", "checks", len(targets), "notifiers", strings.Join(notifierNames(notifiers), ","))
+	return g
+}
+
+func checkNames(cfg *config.Config) []string {
 	names := make([]string, 0, len(cfg.Checks))
-	var public []status.Entry
 	for _, c := range cfg.Checks {
 		names = append(names, c.Name)
+	}
+	return names
+}
+
+func publicEntries(cfg *config.Config) []status.Entry {
+	var public []status.Entry
+	for _, c := range cfg.Checks {
 		if c.IsPublic() {
 			public = append(public, status.Entry{Name: c.Name})
 		}
 	}
+	return public
+}
+
+// restartOnlyChanges lista lo que una recarga no puede aplicar porque afecta a recursos ya abiertos.
+func restartOnlyChanges(old, next *config.Config) []string {
+	var changed []string
+	if old.StateFile != next.StateFile {
+		changed = append(changed, "state_file")
+	}
+	if old.StatusPage.Enabled != next.StatusPage.Enabled {
+		changed = append(changed, "status_page.enabled")
+	}
+	if old.StatusPage.Listen != next.StatusPage.Listen {
+		changed = append(changed, "status_page.listen")
+	}
+	return changed
+}
+
+func serve(ctx context.Context, path string, cfg *config.Config, reload <-chan os.Signal, logger *slog.Logger) error {
+	targets, notifiers, err := build(cfg)
+	if err != nil {
+		return err
+	}
 	store := history.New()
 	if cfg.StateFile != "" {
-		if err := store.Load(cfg.StateFile, names); err != nil {
+		if err := store.Load(cfg.StateFile, checkNames(cfg)); err != nil {
 			return err
 		}
 	}
-	dispatcher := notify.NewDispatcher(notifiers, logger)
-	runner := monitor.NewRunner(targets, store, dispatcher, logger)
 
 	var srv *http.Server
+	var page *status.Server
 	if cfg.StatusPage.Enabled {
 		ln, err := net.Listen("tcp", cfg.StatusPage.Listen)
 		if err != nil {
 			return fmt.Errorf("status page: %w", err)
 		}
-		srv = &http.Server{
-			Handler:           status.NewServer(cfg.StatusPage.Title, public, store, logger).Handler(),
-			ReadHeaderTimeout: 5 * time.Second,
-		}
+		page = status.NewServer(cfg.StatusPage.Title, publicEntries(cfg), store, logger)
+		srv = &http.Server{Handler: page.Handler(), ReadHeaderTimeout: 5 * time.Second}
 		go func() {
 			if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				logger.Error("status page stopped", "err", err)
@@ -253,14 +316,35 @@ func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		logger.Info("status page listening", "addr", ln.Addr().String())
 	}
 
-	logger.Info("infraping started", "version", version, "checks", len(targets), "notifiers", strings.Join(notifierNames(notifiers), ","))
+	current := startGeneration(ctx, targets, notifiers, store, logger)
+	// Los dispatchers de configuraciones anteriores pueden tener avisos con reintentos pendientes.
+	dispatchers := []*notify.Dispatcher{current.dispatcher}
+	logger.Info("infraping started", "version", version)
+
+	// La ruta se copia aquí porque cfg se reasigna en cada recarga (y state_file no cambia sin reiniciar).
+	stateFile := cfg.StateFile
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		monitor.Persist(ctx, store, cfg.StateFile, persistEvery, logger)
+		monitor.Persist(ctx, store, stateFile, persistEvery, logger)
 	}()
-	runner.Run(ctx)
+
+	for running := true; running; {
+		select {
+		case <-ctx.Done():
+			running = false
+		case <-reload:
+			next, err := reloadConfig(ctx, path, cfg, current, store, page, logger)
+			if err != nil {
+				logger.Error("reload failed, keeping the previous configuration", "err", err)
+				continue
+			}
+			cfg, current = next.cfg, next.gen
+			dispatchers = append(dispatchers, current.dispatcher)
+		}
+	}
+	<-current.done
 	wg.Wait()
 
 	logger.Info("shutting down")
@@ -275,7 +359,9 @@ func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	// Los avisos ya decididos tienen hasta el plazo de apagado para salir.
 	done := make(chan struct{})
 	go func() {
-		dispatcher.Wait()
+		for _, d := range dispatchers {
+			d.Wait()
+		}
 		close(done)
 	}()
 	select {
@@ -284,6 +370,40 @@ func serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		errs = append(errs, errors.New("gave up waiting for pending notifications"))
 	}
 	return errors.Join(errs...)
+}
+
+type reloaded struct {
+	cfg *config.Config
+	gen *generation
+}
+
+// reloadConfig valida y construye todo antes de parar nada: si la configuración nueva está mal,
+// las sondas de la anterior siguen corriendo sin interrupción.
+func reloadConfig(ctx context.Context, path string, old *config.Config, current *generation, store *history.Store, page *status.Server, logger *slog.Logger) (reloaded, error) {
+	logger.Info("reloading configuration", "path", path)
+	next, err := config.Load(path)
+	if err != nil {
+		return reloaded{}, err
+	}
+	targets, notifiers, err := build(next)
+	if err != nil {
+		return reloaded{}, err
+	}
+	if changed := restartOnlyChanges(old, next); len(changed) > 0 {
+		logger.Warn("these settings only change on restart and keep their previous value", "settings", strings.Join(changed, ","))
+		next.StateFile = old.StateFile
+		next.StatusPage.Enabled = old.StatusPage.Enabled
+		next.StatusPage.Listen = old.StatusPage.Listen
+	}
+
+	current.stop()
+	store.Retain(checkNames(next))
+	if page != nil {
+		page.Update(next.StatusPage.Title, publicEntries(next))
+	}
+	gen := startGeneration(ctx, targets, notifiers, store, logger)
+	logger.Info("configuration reloaded")
+	return reloaded{cfg: next, gen: gen}, nil
 }
 
 func notifierNames(ns []notify.Notifier) []string {
