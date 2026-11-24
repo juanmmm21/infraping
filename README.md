@@ -39,6 +39,7 @@ infraping/
 ├── internal/status/      Status page (embedded HTML template), JSON API, /healthz
 ├── examples/             Annotated example configuration
 ├── scripts/              build-release.sh: cross-compiled archives + SHA256SUMS
+├── worker/               Serverless edition for Cloudflare Workers (TypeScript, cron + D1)
 └── Dockerfile            Multi-stage build into a distroless, non-root image
 ```
 
@@ -86,6 +87,32 @@ docker run -d --name infraping \
 Tags follow the release: `0.1.0`, `0.1` and `latest`. To build the image yourself, run `docker build -t infraping .` and use `infraping` as the image name.
 
 The image reads `/config/infraping.yaml` and runs from `/data`, so `state_file: ./state.json` keeps history in the volume.
+
+### Cloudflare Workers (serverless)
+
+If you would rather not run a server at all, `worker/` holds a serverless edition that runs on Cloudflare's free plan. A cron trigger fires every minute, history lives in a D1 database, and the Worker serves the same status page and `/api/status`.
+
+It reads the same YAML format, with three differences that come from the Workers runtime:
+
+- there are no `tls` checks, because a Worker cannot inspect a server's certificate;
+- DNS checks always go through Cloudflare's DNS-over-HTTPS, so `resolver` is not available;
+- the shortest `interval` is `1m`, which is how often the cron fires. `skip_tls_verify` is not supported either.
+
+Anything the Worker cannot do is a validation error, so nothing is silently left unwatched.
+
+The free plan allows 50 outgoing requests and 10 ms of CPU per run. Each `http` or `tcp` check uses one request per run, a `dns` check uses two, and each alert uses one per notifier (up to three with retries). Samples are stored in a compact columnar form, so loading and saving the history of 20 checks takes about 4 ms. Up to about 20 checks fits the free plan comfortably; for more, use the binary or a paid Workers plan.
+
+```bash
+cd worker
+npm install
+cp infraping.example.yaml infraping.yaml        # edit it; it is bundled into the Worker
+npx wrangler login
+npx wrangler secret put TELEGRAM_BOT_TOKEN       # one per ${VARIABLE} in the YAML
+npx wrangler secret put TELEGRAM_CHAT_ID
+npx wrangler deploy                              # creates the D1 database on first deploy
+```
+
+To try it locally, without an account: put the variables in `worker/.dev.vars` (`NAME=value`, one per line), run `npm run dev`, and trigger a run with `curl "http://localhost:8787/cdn-cgi/local/scheduled"`. Local runs use a local D1.
 
 ## Usage
 
@@ -194,6 +221,17 @@ gofmt -l .
 ```
 
 The tests never touch the internet. HTTP, TLS and notifier tests run against local `httptest` servers, and the end-to-end CLI test starts `infraping run` against a closed local port and a local webhook.
+
+The Worker has its own checks, which CI also runs:
+
+```bash
+cd worker
+npm ci
+npm run typecheck
+npm test
+```
+
+Its tests inject `fetch` and the TCP `connect`, so they do not touch the internet either.
 
 ### Releasing
 
