@@ -1,0 +1,25 @@
+# Binarios y artefactos de compilación
+/infraping
+/dist/
+*.test
+*.out
+coverage.*
+
+# Estado en tiempo de ejecución
+/data/
+*.state.json
+
+# Configuración local con secretos
+infraping.yaml
+.env
+
+# Contexto de asistentes (nunca se sube)
+AGENTS.md
+CLAUDE.md
+PROGRESS.md
+START_HERE.md
+
+# Editor / SO
+.DS_Store
+.idea/
+.vscode/
