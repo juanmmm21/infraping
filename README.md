@@ -38,6 +38,7 @@ infraping/
 ├── internal/notify/      Telegram, Discord, Slack, ntfy and webhook senders with retries
 ├── internal/status/      Status page (embedded HTML template), JSON API, /healthz
 ├── examples/             Annotated example configuration
+├── scripts/              build-release.sh: cross-compiled archives + SHA256SUMS
 └── Dockerfile            Multi-stage build into a distroless, non-root image
 ```
 
@@ -169,6 +170,15 @@ gofmt -l .
 ```
 
 The tests never touch the internet. HTTP, TLS and notifier tests run against local `httptest` servers, and the end-to-end CLI test starts `infraping run` against a closed local port and a local webhook.
+
+### Releasing
+
+Pushing a `vX.Y.Z` tag runs `.github/workflows/release.yml`, which tests the code and then, in parallel:
+
+- builds static binaries for Linux, macOS and Windows on amd64 and arm64 with `scripts/build-release.sh` and attaches them, with a `SHA256SUMS` file, to a GitHub release;
+- builds a multi-arch (`linux/amd64`, `linux/arm64`) image and pushes it to `ghcr.io/juanmmm21/infraping` as `X.Y.Z`, `X.Y` and `latest`.
+
+Tags with a hyphen (`v1.0.0-rc.1`) become prereleases and do not move `latest`. To build the same archives locally: `./scripts/build-release.sh v0.0.0-dev` (output in `dist/`).
 
 ## Troubleshooting
 
