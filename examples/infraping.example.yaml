@@ -1,0 +1,71 @@
+# InfraPing example configuration.
+# Copy it to infraping.yaml and adapt it. Secrets are read from the environment
+# with ${VARIABLE} so they never have to live in this file.
+
+defaults:
+  interval: 60s          # how often each check runs
+  timeout: 10s           # per probe
+  failure_threshold: 2   # consecutive failures before alerting
+  recovery_threshold: 1  # consecutive successes before announcing recovery
+
+# Keeps uptime history across restarts. Omit to keep it in memory only.
+state_file: ./data/state.json
+
+status_page:
+  enabled: true
+  listen: ":8080"
+  title: "Example status"
+
+notifiers:
+  - name: phone
+    type: telegram
+    token: ${TELEGRAM_BOT_TOKEN}
+    chat_id: ${TELEGRAM_CHAT_ID}
+
+  - name: push
+    type: ntfy
+    topic: ${NTFY_TOPIC}
+    # server: https://ntfy.sh   # default; point it to your own ntfy if you have one
+
+  # - name: team
+  #   type: discord
+  #   url: ${DISCORD_WEBHOOK_URL}
+  # - name: ops
+  #   type: slack
+  #   url: ${SLACK_WEBHOOK_URL}
+  # - name: automation
+  #   type: webhook
+  #   url: https://example.com/hooks/infraping
+  #   headers:
+  #     Authorization: Bearer ${WEBHOOK_TOKEN}
+
+checks:
+  - name: Website
+    type: http
+    url: https://example.com
+    contains: "Example Domain"
+    max_latency: 2s
+
+  - name: API health
+    type: http
+    url: https://api.example.com/healthz
+    expect_status: [200]
+    interval: 30s
+    notify: [phone]          # only this notifier; omit to alert every notifier
+
+  - name: Database
+    type: tcp
+    address: db.internal:5432
+    public: false            # watched and alerted, but hidden from the status page
+
+  - name: TLS certificate
+    type: tls
+    address: example.com:443
+    min_days_left: 14
+    interval: 6h
+    timeout: 10s
+
+  - name: DNS
+    type: dns
+    host: example.com
+    resolver: 1.1.1.1:53
