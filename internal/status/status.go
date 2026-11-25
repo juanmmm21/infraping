@@ -1,4 +1,5 @@
-// Package status sirve la página pública de estado, su versión en JSON y un /healthz.
+// Package status sirve la página pública de estado, el detalle de cada servicio, su versión en
+// JSON y un /healthz.
 package status
 
 import (
@@ -16,13 +17,35 @@ import (
 	"github.com/juanmmm21/infraping/internal/history"
 )
 
-//go:embed page.html.tmpl
+//go:embed templates/*.tmpl templates/style.css
 var assets embed.FS
 
-var page = template.Must(template.New("page.html.tmpl").Funcs(template.FuncMap{
-	"pct": formatPercent,
-	"ms":  func(v float64) string { return fmt.Sprintf("%.0f ms", v) },
-}).ParseFS(assets, "page.html.tmpl"))
+var pages = template.Must(template.New("").Funcs(template.FuncMap{
+	"pct":      formatPercent,
+	"ms":       func(v float64) string { return fmt.Sprintf("%.0f ms", v) },
+	"css":      func() template.CSS { return template.CSS(styleSheet) },
+	"stamp":    func(t time.Time) string { return t.UTC().Format("2006-01-02 15:04 UTC") },
+	"iso":      func(t time.Time) string { return t.UTC().Format(time.RFC3339) },
+	"label":    statusLabel,
+	"barLabel": barLabel,
+	"f1":       func(v float64) string { return fmt.Sprintf("%.1f", v) },
+	"add":      func(a, b float64) float64 { return a + b },
+	"sub":      func(a, b float64) float64 { return a - b },
+	"half":     func(v float64) float64 { return v / 2 },
+	"grade":    grade,
+	"dict":     dict,
+}).ParseFS(assets, "templates/*.tmpl"))
+
+var styleSheet = mustRead("templates/style.css")
+
+func mustRead(name string) string {
+	data, err := assets.ReadFile(name)
+	if err != nil {
+		// Solo puede fallar si el embed no incluye el fichero, que es un error de compilación encubierto.
+		panic(fmt.Sprintf("embedded asset %s: %v", name, err))
+	}
+	return string(data)
+}
 
 // formatPercent no redondea a 100 % lo que no lo es: 99,996 % se ve como 99.99 %.
 func formatPercent(v float64) string {
@@ -32,49 +55,58 @@ func formatPercent(v float64) string {
 	return fmt.Sprintf("%.2f%%", float64(int(v*10000))/100)
 }
 
-// Entry is a check as the status page knows it. Only public checks are passed in.
-type Entry struct {
-	Name string
+func statusLabel(status string) string {
+	switch status {
+	case "up":
+		return "Operational"
+	case "down":
+		return "Down"
+	default:
+		return "No data yet"
+	}
 }
 
-// DayBar is one cell of the 90-day strip.
-type DayBar struct {
-	Date   string  `json:"date"`
-	Uptime float64 `json:"uptime"`
-	Empty  bool    `json:"no_data"`
-	Level  string  `json:"-"`
+// grade colorea un porcentaje de disponibilidad: verde casi perfecto, ámbar regular, rojo malo.
+func grade(v float64) string {
+	switch {
+	case v >= 0.999:
+		return "good"
+	case v >= 0.98:
+		return "meh"
+	default:
+		return "poor"
+	}
 }
 
-// CheckView is everything shown for one check. It deliberately omits targets and error
-// messages: a public page should not reveal internal addresses or stack traces.
-type CheckView struct {
-	Name          string   `json:"name"`
-	Status        string   `json:"status"`
-	Uptime24h     float64  `json:"uptime_24h"`
-	Uptime30d     float64  `json:"uptime_30d"`
-	Uptime90d     float64  `json:"uptime_90d"`
-	AvgLatencyMS  float64  `json:"avg_latency_ms"`
-	LastCheckedAt string   `json:"last_checked_at,omitempty"`
-	Days          []DayBar `json:"days"`
-	Sparkline     string   `json:"-"`
+// dict deja pasar varios valores a una subplantilla, que en html/template solo recibe uno.
+func dict(pairs ...any) (map[string]any, error) {
+	if len(pairs)%2 != 0 {
+		return nil, fmt.Errorf("dict needs key/value pairs, got %d values", len(pairs))
+	}
+	out := make(map[string]any, len(pairs)/2)
+	for i := 0; i < len(pairs); i += 2 {
+		key, ok := pairs[i].(string)
+		if !ok {
+			return nil, fmt.Errorf("dict key %v is not a string", pairs[i])
+		}
+		out[key] = pairs[i+1]
+	}
+	return out, nil
 }
 
-// View is the whole page.
-type View struct {
-	Title       string      `json:"title"`
-	Overall     string      `json:"overall"`
-	GeneratedAt time.Time   `json:"generated_at"`
-	Checks      []CheckView `json:"checks"`
+func barLabel(b DayBar) string {
+	if b.Empty {
+		return b.Date + ": no data"
+	}
+	return b.Date + ": " + formatPercent(b.Uptime) + " uptime"
 }
 
-const barDays = 90
-
-// Server renders the page from the shared history store.
+// Server renders the pages from the shared history store.
 type Server struct {
 	// mu protege title y entries, que cambian al recargar la configuración.
 	mu      sync.RWMutex
 	title   string
-	entries []Entry
+	entries []pageEntry
 	store   *history.Store
 	now     func() time.Time
 	logger  *slog.Logger
@@ -82,22 +114,31 @@ type Server struct {
 
 // NewServer creates the status page handler.
 func NewServer(title string, entries []Entry, store *history.Store, logger *slog.Logger) *Server {
-	return &Server{title: title, entries: entries, store: store, now: time.Now, logger: logger}
+	return &Server{title: title, entries: assignIDs(entries), store: store, now: time.Now, logger: logger}
 }
 
 // Update cambia el título y las comprobaciones públicas; se usa al recargar la configuración.
 func (s *Server) Update(title string, entries []Entry) {
+	ids := assignIDs(entries)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.title = title
-	s.entries = entries
+	s.entries = ids
+}
+
+func (s *Server) snapshot() (string, []pageEntry) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.title, s.entries
 }
 
 // Handler returns the HTTP routes.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.handlePage)
+	mux.HandleFunc("GET /checks/{id}", s.handleDetail)
 	mux.HandleFunc("GET /api/status", s.handleJSON)
+	mux.HandleFunc("GET /api/checks/{id}", s.handleDetailJSON)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		if _, err := w.Write([]byte("ok\n")); err != nil {
@@ -107,77 +148,102 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-// Build arma la vista a partir del historial en este instante.
+func (s *Server) state(name string) history.CheckState {
+	st, ok := s.store.Get(name)
+	if !ok {
+		return history.CheckState{Status: "unknown"}
+	}
+	return st
+}
+
+// Build arma la portada a partir del historial en este instante.
 func (s *Server) Build() View {
-	s.mu.RLock()
-	title, entries := s.title, s.entries
-	s.mu.RUnlock()
+	title, entries := s.snapshot()
 	now := s.now()
-	view := View{Title: title, GeneratedAt: now.UTC()}
-	down, unknown := 0, 0
+	view := View{Title: title, GeneratedAt: now.UTC(), Checks: []CheckView{}}
+	groups := make([][]IncidentView, 0, len(entries))
 	for _, e := range entries {
-		st, ok := s.store.Get(e.Name)
-		if !ok {
-			st = history.CheckState{Status: "unknown"}
-		}
-		cv := CheckView{
-			Name:      e.Name,
-			Status:    st.Status,
-			Uptime24h: uptimeOfSamples(st.Samples),
-			Uptime30d: st.Uptime(30, now),
-			Uptime90d: st.Uptime(barDays, now),
-			Days:      dayBars(st.Days, now),
-			Sparkline: sparkline(st.Samples, 160, 32),
-		}
-		cv.AvgLatencyMS = avgLatency(st.Samples)
-		if n := len(st.Samples); n > 0 {
-			cv.LastCheckedAt = st.Samples[n-1].At.UTC().Format(time.RFC3339)
-		}
-		switch st.Status {
+		st := s.state(e.Name)
+		cv := buildCheckView(e, st, now)
+		view.Summary.Total++
+		switch cv.Status {
+		case "up":
+			view.Summary.Up++
 		case "down":
-			down++
-		case "unknown":
-			unknown++
+			view.Summary.Down++
+		default:
+			view.Summary.Unknown++
 		}
 		view.Checks = append(view.Checks, cv)
+		groups = append(groups, incidentViews(e, st.Incidents, now))
 	}
-	switch {
-	case len(view.Checks) == 0:
-		view.Overall = "No public checks"
-	case down == len(view.Checks):
-		view.Overall = "Major outage"
-	case down > 0:
-		view.Overall = "Partial outage"
-	case unknown > 0:
-		view.Overall = "Collecting data"
-	default:
-		view.Overall = "All systems operational"
-	}
+	view.Overall, view.Level = overall(view.Summary)
+	view.RecentIncidents = latest(groups, recentIncidents)
 	return view
 }
 
-func (s *Server) handlePage(w http.ResponseWriter, _ *http.Request) {
-	// Se pinta a un búfer primero: si la plantilla falla, se devuelve un 500 limpio y no media página.
+// BuildDetail arma la página de una comprobación pública; ok es falso si no existe o es privada.
+func (s *Server) BuildDetail(id string) (Detail, bool) {
+	title, entries := s.snapshot()
+	for _, e := range entries {
+		if e.ID == id {
+			return buildDetail(title, e, s.state(e.Name), s.now()), true
+		}
+	}
+	return Detail{}, false
+}
+
+// render pinta a un búfer primero: si la plantilla falla, se devuelve un 500 limpio y no media página.
+func (s *Server) render(w http.ResponseWriter, status int, name string, data any) {
 	var buf bytes.Buffer
-	if err := page.Execute(&buf, s.Build()); err != nil {
-		s.logger.Error("render status page", "err", err)
+	if err := pages.ExecuteTemplate(&buf, name, data); err != nil {
+		s.logger.Error("render status page", "page", name, "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
 	if _, err := buf.WriteTo(w); err != nil {
 		s.logger.Debug("write status page", "err", err)
 	}
 }
 
-func (s *Server) handleJSON(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	if err := json.NewEncoder(w).Encode(s.Build()); err != nil {
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
 		s.logger.Debug("write status json", "err", err)
 	}
+}
+
+func (s *Server) handlePage(w http.ResponseWriter, _ *http.Request) {
+	s.render(w, http.StatusOK, "index.html.tmpl", s.Build())
+}
+
+func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
+	detail, ok := s.BuildDetail(r.PathValue("id"))
+	if !ok {
+		title, _ := s.snapshot()
+		s.render(w, http.StatusNotFound, "notfound.html.tmpl", map[string]any{"Title": title, "Now": s.now()})
+		return
+	}
+	s.render(w, http.StatusOK, "detail.html.tmpl", detail)
+}
+
+func (s *Server) handleJSON(w http.ResponseWriter, _ *http.Request) {
+	s.writeJSON(w, http.StatusOK, s.Build())
+}
+
+func (s *Server) handleDetailJSON(w http.ResponseWriter, r *http.Request) {
+	detail, ok := s.BuildDetail(r.PathValue("id"))
+	if !ok {
+		s.writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown check"})
+		return
+	}
+	s.writeJSON(w, http.StatusOK, detail)
 }
 
 func uptimeOfSamples(samples []history.Sample) float64 {
