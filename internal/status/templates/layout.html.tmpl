@@ -1,0 +1,50 @@
+{{define "head"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="60">
+<meta name="color-scheme" content="light dark">
+<title>{{.}}</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Ccircle cx=%228%22 cy=%228%22 r=%226%22 fill=%22%2316a34a%22/%3E%3C/svg%3E">
+<style>{{css}}</style>
+</head>
+<body>
+<main>
+{{end}}
+
+{{define "foot"}}
+  <footer>Updated <time datetime="{{iso .}}">{{stamp .}}</time> · refreshes every minute · Powered by <a href="https://github.com/juanmmm21/infraping">InfraPing</a></footer>
+</main>
+<script>
+// Las horas llegan en UTC desde el servidor; aquí se pasan a la hora local de quien mira.
+document.querySelectorAll("time[datetime]").forEach(function (el) {
+  var d = new Date(el.getAttribute("datetime"));
+  if (isNaN(d)) return;
+  var opts = el.dataset.date === "day" ? { day: "numeric", month: "short", year: "numeric" }
+    : { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" };
+  el.textContent = d.toLocaleString(undefined, opts);
+  el.title = d.toString();
+});
+</script>
+</body>
+</html>
+{{end}}
+
+{{define "bars"}}
+  <div class="bars{{if .Big}} big{{end}}" aria-hidden="true">
+    {{range .Days}}<span class="{{.Level}}" data-tip="{{barLabel .}}"></span>{{end}}
+  </div>
+  <div class="scale"><span class="from"><span>90 days ago</span></span><b>{{pct .Uptime}} over 90 days</b><span>Today</span></div>
+{{end}}
+
+{{define "pill"}}<span class="pill {{.}}">{{label .}}</span>{{end}}
+
+{{define "incident"}}
+  <li{{if .Ongoing}} class="ongoing"{{end}}>
+    <div class="what"><span class="dot"></span>{{if .Show}}<a href="{{.Link}}">{{.I.Check}}</a><span class="meta">·</span>{{end}}{{if .I.Ongoing}}Ongoing outage{{else}}Outage resolved{{end}}</div>
+    <div class="meta">
+      <time datetime="{{iso .I.Start}}">{{stamp .I.Start}}</time> · {{if .I.Ongoing}}down for {{.I.Duration}}{{else}}lasted {{.I.Duration}}{{end}}
+    </div>
+  </li>
+{{end}}

@@ -1,0 +1,46 @@
+{{template "head" .Title}}
+  <header class="top">
+    <h1>{{.Title}}</h1>
+    <span class="updated">{{.Summary.Up}} of {{.Summary.Total}} services operational</span>
+  </header>
+
+  <section class="hero {{.Level}}" aria-live="polite">
+    <div class="hero-icon" aria-hidden="true">
+      {{if eq .Level "ok"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+      {{else if eq .Level "none"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M12 7v5l3 2"/></svg>
+      {{else}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M12 7v6M12 17h.01"/></svg>{{end}}
+    </div>
+    <div>
+      <strong>{{.Overall}}</strong>
+      <span>{{if .Summary.Down}}{{.Summary.Down}} of {{.Summary.Total}} services down{{else if .Summary.Unknown}}Waiting for the first results{{else}}Every service answered its last check{{end}}</span>
+    </div>
+  </section>
+
+  {{if .Checks}}
+  <h2>Services</h2>
+  <section class="card list">
+    {{range .Checks}}
+    <a class="service" href="checks/{{.ID}}" aria-label="{{.Name}}: {{label .Status}}, {{pct .Uptime90d}} uptime over 90 days. Open details.">
+      <div class="row">
+        <div class="name"><span>{{.Name}}</span>{{if .Kind}}<span class="kind">{{.Kind}}</span>{{end}}<span class="chev" aria-hidden="true">›</span></div>
+        {{template "pill" .Status}}
+      </div>
+      {{template "bars" (dict "Days" .Days "Uptime" .Uptime90d "Big" false)}}
+      <div class="foot">
+        <span class="meta">24h {{pct .Uptime24h}} · 30d {{pct .Uptime30d}}{{if .AvgLatencyMS}} · avg {{ms .AvgLatencyMS}}{{end}}</span>
+        {{if .Sparkline}}<svg class="spark" viewBox="0 0 120 28" preserveAspectRatio="none" aria-hidden="true"><polyline points="{{.Sparkline}}"/></svg>{{end}}
+      </div>
+    </a>
+    {{end}}
+  </section>
+  {{end}}
+
+  <h2>Recent incidents</h2>
+  <section class="card">
+    {{if .RecentIncidents}}
+    <ul class="incidents">
+      {{range .RecentIncidents}}{{template "incident" (dict "I" . "Show" true "Link" (printf "checks/%s" .CheckID) "Ongoing" .Ongoing)}}{{end}}
+    </ul>
+    {{else}}<p class="empty">No incidents recorded.</p>{{end}}
+  </section>
+{{template "foot" .GeneratedAt}}

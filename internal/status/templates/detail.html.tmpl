@@ -1,0 +1,57 @@
+{{template "head" (printf "%s · %s" .Check.Name .Title)}}
+  <a class="back" href="../">‹ {{.Title}}</a>
+
+  <div class="detail-head">
+    <h1>{{.Check.Name}}</h1>
+    {{template "pill" .Check.Status}}
+  </div>
+  <p class="sub">{{if .Check.Kind}}{{.Check.Kind}} check{{else}}Check{{end}}{{if .IntervalSeconds}} every {{.Interval}}{{end}}{{if .Check.LastCheckedAt}} · last checked <time datetime="{{.Check.LastCheckedAt}}">{{.Check.LastCheckedAt}}</time>{{end}}</p>
+
+  <h2>Uptime</h2>
+  <section class="stats">
+    {{template "stat" (dict "K" "Last 24 hours" "V" .Check.Uptime24h)}}
+    {{template "stat" (dict "K" "Last 7 days" "V" .Uptime7d)}}
+    {{template "stat" (dict "K" "Last 30 days" "V" .Check.Uptime30d)}}
+    {{template "stat" (dict "K" "Last 90 days" "V" .Check.Uptime90d)}}
+  </section>
+
+  <h2>Response time</h2>
+  <section class="stats">
+    <div class="card stat"><div class="k">Median</div><div class="v">{{if .P50MS}}{{ms .P50MS}}{{else}}–{{end}}</div></div>
+    <div class="card stat"><div class="k">95th percentile</div><div class="v">{{if .P95MS}}{{ms .P95MS}}{{else}}–{{end}}</div></div>
+    <div class="card stat"><div class="k">Slowest</div><div class="v">{{if .MaxMS}}{{ms .MaxMS}}{{else}}–{{end}}</div></div>
+    <div class="card stat"><div class="k">Failed checks · 24h</div><div class="v{{if .Failed24h}} poor{{end}}">{{.Failed24h}} <span class="meta">of {{.Checks24h}}</span></div></div>
+  </section>
+
+  <section class="card panel" style="margin-top:12px">
+    <div class="panel-head">
+      <h3>Last 24 hours</h3>
+      <div class="legend"><span><i></i>response time</span><span><i class="f"></i>failed check</span></div>
+    </div>
+    {{with .Chart}}
+    <svg class="chart" viewBox="0 0 {{.Width}} {{.Height}}" role="img" aria-label="Response time over the last 24 hours">
+      {{range .YTicks}}<line class="grid" x1="{{f1 $.Chart.Left}}" x2="{{f1 $.Chart.Right}}" y1="{{f1 .Pos}}" y2="{{f1 .Pos}}"/><text class="axis" x="{{f1 (sub $.Chart.Left 8)}}" y="{{f1 (add .Pos 4)}}" text-anchor="end">{{.Label}}</text>{{end}}
+      {{range .XTicks}}<text class="axis" x="{{f1 .Pos}}" y="{{f1 (add $.Chart.Bottom 18)}}" text-anchor="{{if eq .Label "now"}}end{{else}}middle{{end}}">{{.Label}}</text>{{end}}
+      {{range .Failures}}<rect class="fail" x="{{f1 .X}}" width="{{f1 .W}}" y="{{f1 $.Chart.Top}}" height="{{f1 (sub $.Chart.Bottom $.Chart.Top)}}"/>{{end}}
+      {{if .Empty}}<text class="nodata" x="{{f1 (half (add .Left .Right))}}" y="{{f1 (half (add .Top .Bottom))}}" text-anchor="middle">Not enough data yet</text>
+      {{else}}<path class="area" d="{{.Area}}"/><path class="line" d="{{.Line}}"/>{{end}}
+    </svg>
+    {{end}}
+  </section>
+
+  <h2>Last 90 days</h2>
+  <section class="card panel">
+    {{template "bars" (dict "Days" .Check.Days "Uptime" .Check.Uptime90d "Big" true)}}
+  </section>
+
+  <h2>Incidents</h2>
+  <section class="card">
+    {{if .Incidents}}
+    <ul class="incidents">
+      {{range .Incidents}}{{template "incident" (dict "I" . "Show" false "Link" "" "Ongoing" .Ongoing)}}{{end}}
+    </ul>
+    {{else}}<p class="empty">No incidents recorded for this service.</p>{{end}}
+  </section>
+{{template "foot" .GeneratedAt}}
+
+{{define "stat"}}<div class="card stat"><div class="k">{{.K}}</div><div class="v {{grade .V}}">{{pct .V}}</div></div>{{end}}
