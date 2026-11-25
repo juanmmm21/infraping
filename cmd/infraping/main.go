@@ -266,7 +266,7 @@ func publicEntries(cfg *config.Config) []status.Entry {
 	var public []status.Entry
 	for _, c := range cfg.Checks {
 		if c.IsPublic() {
-			public = append(public, status.Entry{Name: c.Name})
+			public = append(public, status.Entry{Name: c.Name, Kind: strings.ToUpper(c.Type), Interval: c.Interval.Std()})
 		}
 	}
 	return public
