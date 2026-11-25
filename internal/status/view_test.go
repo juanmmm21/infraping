@@ -194,3 +194,17 @@ func TestChart(t *testing.T) {
 }
 
 func quietLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
+
+func TestChartWithLittleData(t *testing.T) {
+	c := latencyChart([]history.Sample{{At: now.Add(-time.Minute), OK: false}}, now)
+	labels := make([]string, 0, len(c.YTicks))
+	for _, tick := range c.YTicks {
+		labels = append(labels, tick.Label)
+	}
+	if got := strings.Join(labels, ","); got != "0 ms,25 ms,50 ms,75 ms,100 ms" {
+		t.Errorf("y axis = %s", got)
+	}
+	if len(c.Failures) != 1 || c.Failures[0].W < 2 {
+		t.Errorf("a single failure must be visible: %+v", c.Failures)
+	}
+}

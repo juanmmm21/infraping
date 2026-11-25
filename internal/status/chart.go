@@ -19,6 +19,7 @@ const (
 	plotBottom  = chartHeight - 28
 	chartSpan   = 24 * time.Hour
 	yTicks      = 4
+	minAxisMS   = 100
 )
 
 // Tick is one axis label.
@@ -87,7 +88,8 @@ func latencyChart(samples []history.Sample, now time.Time) Chart {
 			ok++
 		}
 	}
-	top := niceCeil(hi * 1.1)
+	// Con poca o ninguna latencia el eje no baja de 100 ms: si no, saldrían marcas repetidas («1 ms»).
+	top := niceCeil(max(hi*1.1, minAxisMS))
 	y := func(ms float64) float64 { return plotBottom - ms/top*(plotBottom-plotTop) }
 
 	for i := 0; i <= yTicks; i++ {
@@ -106,13 +108,15 @@ func latencyChart(samples []history.Sample, now time.Time) Chart {
 		c.Empty = true
 	}
 	// Media muestra a cada lado, para que una caída de una sola sonda también se vea.
-	half := 0.0
+	half := 1.0
 	if n := len(samples); n > 1 {
 		span := samples[n-1].At.Sub(samples[0].At) / time.Duration(n-1)
 		half = max(1, float64(span)/float64(chartSpan)*(plotRight-plotLeft)/2)
 	}
 	addFailure := func(px float64) {
-		left, right := max(plotLeft, px-half), min(plotRight, px+half)
+		// Pegada a un borde, la banda se mete hacia dentro en vez de recortarse.
+		left := max(plotLeft, min(px-half, plotRight-2*half))
+		right := left + 2*half
 		if n := len(c.Failures); n > 0 && c.Failures[n-1].X+c.Failures[n-1].W >= left-0.5 {
 			c.Failures[n-1].W = right - c.Failures[n-1].X
 			return
