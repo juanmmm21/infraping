@@ -131,3 +131,47 @@ func TestRetainDropsRemovedChecks(t *testing.T) {
 		t.Error("Retain must not create entries")
 	}
 }
+
+func TestIncidents(t *testing.T) {
+	s := New()
+	s.CloseIncident("x", base) // sin caída abierta no hace nada
+	s.OpenIncident("x", base)
+	s.OpenIncident("x", base.Add(time.Minute)) // ya abierta: no se duplica
+	st, _ := s.Get("x")
+	if len(st.Incidents) != 1 || !st.Incidents[0].Ongoing() || st.Incidents[0].Duration(base.Add(time.Hour)) != time.Hour {
+		t.Fatalf("open incident = %+v", st.Incidents)
+	}
+	s.CloseIncident("x", base.Add(10*time.Minute))
+	st, _ = s.Get("x")
+	if st.Incidents[0].Ongoing() || st.Incidents[0].Duration(base.Add(time.Hour)) != 10*time.Minute {
+		t.Fatalf("closed incident = %+v", st.Incidents)
+	}
+	st.Incidents[0].End = time.Time{}
+	if again, _ := s.Get("x"); again.Incidents[0].Ongoing() {
+		t.Fatal("Get must copy incidents")
+	}
+}
+
+func TestIncidentsAreCappedAndPersisted(t *testing.T) {
+	s := New()
+	for i := range 60 {
+		at := base.Add(time.Duration(i) * time.Hour)
+		s.OpenIncident("x", at)
+		s.CloseIncident("x", at.Add(time.Minute))
+	}
+	st, _ := s.Get("x")
+	if len(st.Incidents) != maxIncidents || !st.Incidents[0].Start.Equal(base.Add(10*time.Hour)) {
+		t.Fatalf("got %d incidents, first %v", len(st.Incidents), st.Incidents[0].Start)
+	}
+	path := filepath.Join(t.TempDir(), "state.json")
+	if err := s.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	loaded := New()
+	if err := loaded.Load(path, []string{"x"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := loaded.Get("x"); len(got.Incidents) != maxIncidents {
+		t.Fatalf("loaded %d incidents", len(got.Incidents))
+	}
+}

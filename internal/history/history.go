@@ -18,6 +18,8 @@ const (
 	sampleWindow = 24 * time.Hour
 	dayWindow    = 90
 	dayLayout    = "2006-01-02"
+	// Con 50 caídas guardadas sobra para ver el patrón de un servicio y el JSON no crece sin límite.
+	maxIncidents = 50
 )
 
 // Sample is one probe result, reduced to what the status page draws.
@@ -42,13 +44,31 @@ func (d Day) Uptime() float64 {
 	return float64(d.OK) / float64(d.Total)
 }
 
+// Incident is one confirmed outage. End is zero while it is still going on.
+type Incident struct {
+	Start time.Time `json:"start"`
+	End   time.Time `json:"end,omitzero"`
+}
+
+// Ongoing tells whether the outage has not recovered yet.
+func (i Incident) Ongoing() bool { return i.End.IsZero() }
+
+// Duration is how long the outage lasted, or has lasted so far if it is ongoing.
+func (i Incident) Duration(now time.Time) time.Duration {
+	if i.Ongoing() {
+		return now.Sub(i.Start)
+	}
+	return i.End.Sub(i.Start)
+}
+
 // CheckState is what is persisted about each check between restarts.
 type CheckState struct {
-	Status    string    `json:"status"`
-	DownSince time.Time `json:"down_since,omitzero"`
-	Message   string    `json:"message"`
-	Samples   []Sample  `json:"samples"`
-	Days      []Day     `json:"days"`
+	Status    string     `json:"status"`
+	DownSince time.Time  `json:"down_since,omitzero"`
+	Message   string     `json:"message"`
+	Samples   []Sample   `json:"samples"`
+	Days      []Day      `json:"days"`
+	Incidents []Incident `json:"incidents,omitempty"`
 }
 
 // Store is safe for concurrent use.
@@ -105,6 +125,31 @@ func (s *Store) SetStatus(name, status string, downSince time.Time, message stri
 	st.Message = message
 }
 
+// OpenIncident apunta el comienzo de una caída confirmada. Si ya hay una abierta no hace nada:
+// tras un reinicio con la caída en curso, el tracker la vuelve a confirmar y no debe duplicarse.
+func (s *Store) OpenIncident(name string, start time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st := s.state(name)
+	if n := len(st.Incidents); n > 0 && st.Incidents[n-1].Ongoing() {
+		return
+	}
+	st.Incidents = append(st.Incidents, Incident{Start: start})
+	if len(st.Incidents) > maxIncidents {
+		st.Incidents = st.Incidents[len(st.Incidents)-maxIncidents:]
+	}
+}
+
+// CloseIncident cierra la caída abierta, si la hay.
+func (s *Store) CloseIncident(name string, end time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st := s.state(name)
+	if n := len(st.Incidents); n > 0 && st.Incidents[n-1].Ongoing() {
+		st.Incidents[n-1].End = end
+	}
+}
+
 // Retain borra el historial de las comprobaciones que ya no están en la configuración.
 func (s *Store) Retain(keep []string) {
 	wanted := make(map[string]bool, len(keep))
@@ -135,6 +180,7 @@ func copyState(st *CheckState) CheckState {
 	out := *st
 	out.Samples = append([]Sample(nil), st.Samples...)
 	out.Days = append([]Day(nil), st.Days...)
+	out.Incidents = append([]Incident(nil), st.Incidents...)
 	return out
 }
 
