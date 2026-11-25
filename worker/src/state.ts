@@ -1,9 +1,11 @@
 // Máquina de estados e historial, con la misma semántica que internal/monitor e internal/history
 // del binario, pero sobre datos planos porque cada ejecución del cron empieza de cero.
-import type { CheckConfig, CheckResult, CheckState, Day, Sample, State, Status } from "./types.js";
+import type { CheckConfig, CheckResult, CheckState, Day, Incident, Sample, State, Status } from "./types.js";
 
 const SAMPLE_WINDOW_MS = 24 * 3_600_000;
 export const DAY_WINDOW = 90;
+// Con 50 caídas guardadas basta para ver el patrón, y la fila de D1 no crece sin límite.
+export const MAX_INCIDENTS = 50;
 // El cron no es exacto al segundo: sin este margen, un check de 60 s se saltaría una de cada dos pasadas.
 const SCHEDULE_SLACK_MS = 5_000;
 
@@ -13,7 +15,7 @@ export interface Transition {
 }
 
 export function emptyState(): CheckState {
-  return { status: "unknown", failStreak: 0, okStreak: 0, downSince: 0, lastRun: 0, samples: [], days: [] };
+  return { status: "unknown", failStreak: 0, okStreak: 0, downSince: 0, lastRun: 0, samples: [], days: [], incidents: [] };
 }
 
 export function isDue(c: CheckConfig, st: CheckState | undefined, now: number): boolean {
@@ -44,6 +46,23 @@ export function observe(st: CheckState, c: CheckConfig, res: CheckResult): Trans
   if (st.status === "down" || st.failStreak < c.failureThreshold) return null;
   st.status = "down";
   return { to: "down", downtimeMs: 0 };
+}
+
+export function isOngoing(i: Incident): boolean {
+  return i.end === 0;
+}
+
+// openIncident no duplica una caída que ya está abierta.
+export function openIncident(st: CheckState, start: number): void {
+  const last = st.incidents.at(-1);
+  if (last !== undefined && isOngoing(last)) return;
+  st.incidents.push({ start, end: 0 });
+  if (st.incidents.length > MAX_INCIDENTS) st.incidents = st.incidents.slice(-MAX_INCIDENTS);
+}
+
+export function closeIncident(st: CheckState, end: number): void {
+  const last = st.incidents.at(-1);
+  if (last !== undefined && isOngoing(last)) last.end = end;
 }
 
 export function dayKey(at: number): string {

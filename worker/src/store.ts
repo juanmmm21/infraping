@@ -1,6 +1,6 @@
 // El estado entero cabe en una fila: una sola escritura por minuto queda muy por debajo del
 // límite gratuito de D1.
-import type { CheckState, Sample, State } from "./types.js";
+import type { CheckState, Incident, Sample, State } from "./types.js";
 
 // Las muestras se guardan en columnas (segundos, "1"/"0", ms enteros): el plan gratuito da 10 ms de
 // CPU por invocación y parsear 24 h de objetos sueltos costaba 3,5 veces más.
@@ -10,7 +10,7 @@ interface StoredSamples {
   l: number[];
 }
 
-type StoredCheck = Omit<CheckState, "samples"> & { samples: StoredSamples };
+type StoredCheck = Omit<CheckState, "samples" | "incidents"> & { samples: StoredSamples; incidents?: Incident[] };
 
 export function encodeState(state: State): string {
   const out: Record<string, StoredCheck> = {};
@@ -34,7 +34,8 @@ export function decodeState(text: string): State {
     const { t, o, l } = st.samples;
     if (t.length !== o.length || t.length !== l.length) throw new Error(`state of ${name}: sample columns differ in length`);
     const samples: Sample[] = t.map((sec, i) => ({ at: sec * 1000, ok: o[i] === "1", latencyMs: l[i] ?? 0 }));
-    out[name] = { ...st, samples };
+    // Un estado guardado antes de existir las incidencias no las trae.
+    out[name] = { ...st, samples, incidents: st.incidents ?? [] };
   }
   return out;
 }

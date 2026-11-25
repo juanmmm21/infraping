@@ -43,6 +43,10 @@ describe("tick", () => {
     expect(res.alerts).toHaveLength(1);
     expect(net.alerts.map((a) => a.kind)).toEqual(["down", "recovered"]);
     expect(net.alerts[1]?.downtime_seconds).toBe(240);
+    // La caída queda apuntada con su comienzo en el primer fallo y su final en la vuelta.
+    expect(store.saved.web?.incidents).toHaveLength(1);
+    const inc = store.saved.web?.incidents[0];
+    expect(inc !== undefined && inc.end - inc.start).toBe(240_000);
   });
 
   it("respects each check's interval", async () => {
@@ -74,7 +78,7 @@ describe("tick", () => {
     const { net, fetchFn } = fakeNet();
     net.serviceUp = false;
     const store = new MemoryStore();
-    store.saved = { gone: { status: "down", failStreak: 3, okStreak: 0, downSince: 1, lastRun: 1, samples: [], days: [] } };
+    store.saved = { gone: { status: "down", failStreak: 3, okStreak: 0, downSince: 1, lastRun: 1, samples: [], days: [], incidents: [] } };
     const cfg = config({
       notifiers: [notifier({ name: "a" }), notifier({ name: "b", url: "https://elsewhere.test/" })],
       checks: [check({ failureThreshold: 1, notify: ["a"] })],

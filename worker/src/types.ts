@@ -62,6 +62,12 @@ export interface Day {
   ok: number;
 }
 
+// Incident es una caída confirmada; end vale 0 mientras sigue abierta.
+export interface Incident {
+  start: number;
+  end: number;
+}
+
 // CheckState es lo que se guarda de cada comprobación entre ejecuciones del cron.
 export interface CheckState {
   status: Status;
@@ -71,6 +77,7 @@ export interface CheckState {
   lastRun: number;
   samples: Sample[];
   days: Day[];
+  incidents: Incident[];
 }
 
 export type State = Record<string, CheckState>;

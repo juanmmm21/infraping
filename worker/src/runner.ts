@@ -1,7 +1,7 @@
 // Una pasada del cron: carga el estado, lanza las comprobaciones que tocan, avisa y guarda.
 import { type ProbeDeps, runCheck, targetLabel } from "./checks.js";
 import { defaultSendOptions, send, type SendOptions, targets } from "./notify.js";
-import { emptyState, isDue, observe, record, retain } from "./state.js";
+import { closeIncident, emptyState, isDue, observe, openIncident, record, retain } from "./state.js";
 import type { StateStore } from "./store.js";
 import type { Config, Message } from "./types.js";
 
@@ -44,6 +44,8 @@ export async function tick(
     const transition = observe(st, c, res);
     if (!res.ok) logger.info("check failed", { check: c.name, reason: res.message, status: st.status });
     if (transition === null) return;
+    if (transition.to === "down") openIncident(st, st.downSince);
+    else closeIncident(st, res.checkedAt);
     alerts.push({
       notify: c.notify,
       msg: {

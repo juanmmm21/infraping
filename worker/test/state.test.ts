@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { emptyState, isDue, observe, record, retain, uptimeDays } from "../src/state.js";
+import { MAX_INCIDENTS, closeIncident, emptyState, isDue, observe, openIncident, record, retain, uptimeDays } from "../src/state.js";
 import type { CheckResult } from "../src/types.js";
 import { check } from "./helpers.js";
 
@@ -62,5 +62,22 @@ describe("isDue", () => {
     const st = { ...emptyState(), lastRun: T0 };
     expect(isDue(c, st, T0 + 240_000)).toBe(false);
     expect(isDue(c, st, T0 + 298_000)).toBe(true);
+  });
+});
+
+describe("incidents", () => {
+  it("opens once, closes and caps at 50", () => {
+    const st = emptyState();
+    closeIncident(st, T0);
+    openIncident(st, T0);
+    openIncident(st, T0 + 60_000);
+    expect(st.incidents).toEqual([{ start: T0, end: 0 }]);
+    closeIncident(st, T0 + 600_000);
+    expect(st.incidents).toEqual([{ start: T0, end: T0 + 600_000 }]);
+    for (let i = 1; i <= 60; i++) {
+      openIncident(st, T0 + i * 3_600_000);
+      closeIncident(st, T0 + i * 3_600_000 + 1);
+    }
+    expect(st.incidents).toHaveLength(MAX_INCIDENTS);
   });
 });

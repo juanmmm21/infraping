@@ -19,3 +19,10 @@ describe("state encoding", () => {
     expect(() => decodeState(broken)).toThrow("sample columns differ in length");
   });
 });
+
+describe("older saved state", () => {
+  it("gets an empty incident list", () => {
+    const old = JSON.stringify({ web: { status: "up", failStreak: 0, okStreak: 1, downSince: 0, lastRun: 1, samples: { t: [], o: "", l: [] }, days: [] } });
+    expect(decodeState(old).web?.incidents).toEqual([]);
+  });
+});
