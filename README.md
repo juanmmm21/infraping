@@ -54,11 +54,11 @@ infraping/
 Every [release](https://github.com/juanmmm21/infraping/releases) ships static binaries for Linux, macOS and Windows on amd64 and arm64, plus a `SHA256SUMS` file:
 
 ```bash
-curl -LO https://github.com/juanmmm21/infraping/releases/download/v0.1.0/infraping_0.1.0_linux_amd64.tar.gz
-curl -LO https://github.com/juanmmm21/infraping/releases/download/v0.1.0/SHA256SUMS
+curl -LO https://github.com/juanmmm21/infraping/releases/download/v0.2.0/infraping_0.2.0_linux_amd64.tar.gz
+curl -LO https://github.com/juanmmm21/infraping/releases/download/v0.2.0/SHA256SUMS
 sha256sum -c --ignore-missing SHA256SUMS
-tar xzf infraping_0.1.0_linux_amd64.tar.gz
-./infraping_0.1.0_linux_amd64/infraping version
+tar xzf infraping_0.2.0_linux_amd64.tar.gz
+./infraping_0.2.0_linux_amd64/infraping version
 ```
 
 ### From source (Go 1.24+)
@@ -85,10 +85,10 @@ docker run -d --name infraping \
   -v "$PWD/infraping.yaml:/config/infraping.yaml:ro" \
   -v infraping-data:/data \
   -e TELEGRAM_BOT_TOKEN -e TELEGRAM_CHAT_ID \
-  ghcr.io/juanmmm21/infraping:0.1
+  ghcr.io/juanmmm21/infraping:0.2
 ```
 
-Tags follow the release: `0.1.0`, `0.1` and `latest`. To build the image yourself, run `docker build -t infraping .` and use `infraping` as the image name.
+Tags follow the release: `0.2.0`, `0.2` and `latest`. To build the image yourself, run `docker build -t infraping .` and use `infraping` as the image name.
 
 The image reads `/config/infraping.yaml` and runs from `/data`, so `state_file: ./state.json` keeps history in the volume.
 
