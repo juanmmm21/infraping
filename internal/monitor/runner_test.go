@@ -79,6 +79,11 @@ func TestProbeCycle(t *testing.T) {
 	if st.Status != "up" || len(st.Samples) != 5 || st.Samples[0].LatencyMS != 25 {
 		t.Errorf("store = %+v", st)
 	}
+	// La caída empieza en el primer fallo (minuto 2) y acaba con la vuelta (minuto 5).
+	want := []history.Incident{{Start: t0.Add(2 * time.Minute), End: t0.Add(5 * time.Minute)}}
+	if len(st.Incidents) != 1 || st.Incidents[0] != want[0] {
+		t.Errorf("incidents = %+v, want %+v", st.Incidents, want)
+	}
 }
 
 func TestProbeIgnoresShutdown(t *testing.T) {
@@ -125,6 +130,11 @@ func TestRunRestoresOutageAndStops(t *testing.T) {
 	<-done
 	if sender.sent[0].Kind != notify.KindRecovered {
 		t.Fatalf("want recovery, got %+v", sender.sent[0])
+	}
+	// El estado venía sin incidencias: la caída restaurada se apunta desde su comienzo y se cierra.
+	st, _ := store.Get("api")
+	if len(st.Incidents) != 1 || !st.Incidents[0].Start.Equal(t0) || st.Incidents[0].Ongoing() {
+		t.Fatalf("incidents = %+v", st.Incidents)
 	}
 }
 

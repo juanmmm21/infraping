@@ -67,6 +67,8 @@ func (r *Runner) loop(ctx context.Context, t Target) {
 	tracker := NewTracker(cfg.Name, cfg.FailureThreshold, cfg.RecoveryThreshold)
 	if saved, ok := r.store.Get(cfg.Name); ok && saved.Status == string(StatusDown) {
 		tracker.Restore(StatusDown, saved.DownSince)
+		// Un estado guardado por una versión sin incidencias no la tendría apuntada.
+		r.store.OpenIncident(cfg.Name, saved.DownSince)
 	}
 
 	// Un pequeño desfase aleatorio al arrancar evita que todas las sondas salgan en el mismo instante.
@@ -109,9 +111,11 @@ func (r *Runner) Probe(ctx context.Context, t Target, tracker *Tracker) {
 	}
 	msg := notify.Message{Check: cfg.Name, Target: TargetLabel(cfg), Reason: res.Message, At: res.CheckedAt}
 	if ev.To == StatusDown {
+		r.store.OpenIncident(cfg.Name, tracker.DownSince())
 		msg.Kind = notify.KindDown
 		r.logger.Error("check down", "check", cfg.Name, "reason", res.Message)
 	} else {
+		r.store.CloseIncident(cfg.Name, res.CheckedAt)
 		msg.Kind = notify.KindRecovered
 		msg.Downtime = ev.Downtime
 		r.logger.Info("check recovered", "check", cfg.Name, "downtime", ev.Downtime)
