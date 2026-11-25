@@ -1,9 +1,10 @@
 import { connect } from "cloudflare:sockets";
+import styleSheet from "../../internal/status/templates/style.css";
 import configText from "../infraping.yaml";
 import type { ProbeDeps } from "./checks.js";
 import { loadConfig } from "./config.js";
 import { consoleLogger, tick } from "./runner.js";
-import { buildView, renderPage, sparklines } from "./status.js";
+import { buildDetail, buildView, renderDetail, renderNotFound, renderPage, samplesFor, sparklines } from "./status.js";
 import { D1Store } from "./store.js";
 import type { Config } from "./types.js";
 
@@ -39,18 +40,30 @@ export default {
     const url = new URL(request.url);
     if (request.method !== "GET") return new Response("method not allowed\n", { status: 405 });
     if (url.pathname === "/healthz") return new Response("ok\n", { headers: { "Content-Type": "text/plain; charset=utf-8" } });
-    if (url.pathname !== "/" && url.pathname !== "/api/status") return new Response("not found\n", { status: 404 });
+
+    const html = (body: string, status = 200): Response =>
+      new Response(body, { status, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
+    const json = (body: unknown, status = 200): Response =>
+      Response.json(body, { status, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
+
+    const detailID = /^\/(api\/)?checks\/([^/]+)$/.exec(url.pathname);
+    if (url.pathname !== "/" && url.pathname !== "/api/status" && detailID === null) {
+      return new Response("not found\n", { status: 404 });
+    }
 
     const cfg = config(env);
     const state = await new D1Store(env.DB).load();
-    const view = buildView(cfg, state, Date.now());
-    if (url.pathname === "/api/status") {
-      return Response.json(view, {
-        headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" },
-      });
+    const now = Date.now();
+    if (detailID !== null) {
+      const id = decodeURIComponent(detailID[2] ?? "");
+      const detail = buildDetail(cfg, state, id, now);
+      if (detailID[1] !== undefined) return detail === null ? json({ error: "unknown check" }, 404) : json(detail);
+      return detail === null
+        ? html(renderNotFound(cfg.title, now, styleSheet), 404)
+        : html(renderDetail(detail, samplesFor(cfg, state, id), styleSheet));
     }
-    return new Response(renderPage(view, sparklines(cfg, state)), {
-      headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
-    });
+    const view = buildView(cfg, state, now);
+    if (url.pathname === "/api/status") return json(view);
+    return html(renderPage(view, sparklines(cfg, state), styleSheet));
   },
 } satisfies ExportedHandler<Env>;

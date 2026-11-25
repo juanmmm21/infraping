@@ -5,7 +5,8 @@
   "compatibility_date": "2026-11-01",
   // Cada minuto: es la granularidad mínima de los cron triggers; cada comprobación respeta su interval.
   "triggers": { "crons": ["* * * * *"] },
-  "rules": [{ "type": "Text", "globs": ["**/*.yaml"], "fallthrough": true }],
+  // El CSS es el mismo fichero que usa el binario: las dos páginas se ven igual sin copiarlo.
+  "rules": [{ "type": "Text", "globs": ["**/*.yaml", "**/*.css"], "fallthrough": true }],
   // Sin database_id: el primer `wrangler deploy` crea la base D1 y escribe aquí su id.
   "d1_databases": [{ "binding": "DB" }]
 }

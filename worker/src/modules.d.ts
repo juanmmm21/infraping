@@ -1,5 +1,10 @@
-// wrangler empaqueta los .yaml como texto (regla "Text" en wrangler.jsonc).
+// wrangler empaqueta los .yaml y el .css como texto (regla "Text" en wrangler.jsonc).
 declare module "*.yaml" {
+  const text: string;
+  export default text;
+}
+
+declare module "*.css" {
   const text: string;
   export default text;
 }
