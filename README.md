@@ -94,7 +94,7 @@ The image reads `/config/infraping.yaml` and runs from `/data`, so `state_file: 
 
 ### Cloudflare Workers (serverless)
 
-If you would rather not run a server at all, `worker/` holds a serverless edition that runs on Cloudflare's free plan. A cron trigger fires every minute, history lives in a D1 database, and the Worker serves the same status page and `/api/status`.
+If you would rather not run a server at all, `worker/` holds a serverless edition that runs on Cloudflare's free plan. A cron trigger fires every minute, history and incidents live in a D1 database, and the Worker serves the same status page, per-service pages and JSON API, built from the same stylesheet.
 
 It reads the same YAML format, with three differences that come from the Workers runtime:
 
