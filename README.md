@@ -6,7 +6,7 @@
 
 ## What it is
 
-InfraPing probes your websites, APIs, open ports, TLS certificates and DNS records on a schedule. When something stays broken it alerts you on Telegram, Discord, Slack, ntfy or any webhook, and it tells you again when it comes back. It also serves a public status page with 90 days of uptime history.
+InfraPing probes your websites, APIs, open ports, TLS certificates and DNS records on a schedule. When something stays broken it alerts you on Telegram, Discord, Slack, ntfy or any webhook, and it tells you again when it comes back. It also serves a public status page with 90 days of uptime history, and a page per service with its response-time chart, uptime over several windows and its list of past outages.
 
 It is meant for homelabs, side projects and small teams who want something between a cron job that runs `curl` and a full observability stack. It has no database, no runtime dependencies and no account to create. Everything lives in one config file, and secrets come from environment variables.
 
@@ -14,8 +14,8 @@ It is meant for homelabs, side projects and small teams who want something betwe
 
 - **One static binary.** Go and `CGO_ENABLED=0` produce a ~15 MB executable that runs on a VPS, a Raspberry Pi or a `distroless` container without installing anything else.
 - **Confirmed state, not raw failures.** Each check goes through a small state machine with failure and recovery thresholds. A single dropped packet does not page anyone, an outage is reported once and not every minute, and its start time is the first failure, not the one that confirmed it.
-- **Restarts do not lose anything.** History and the current outage are written atomically to a JSON file. After a restart InfraPing neither repeats a "down" alert nor misses the "recovered" one.
-- **A public page that leaks nothing.** The status page shows names, uptime and latency, never targets or error messages, so internal hostnames and IPs stay private. Checks can also be hidden from it entirely.
+- **Restarts do not lose anything.** History, the last 50 outages of each check and the current outage are written atomically to a JSON file. After a restart InfraPing neither repeats a "down" alert nor misses the "recovered" one.
+- **A public page that leaks nothing.** The status page and the per-service pages show names, uptime, latency and when outages happened, never targets or error messages, so internal hostnames and IPs stay private. Checks can also be hidden from it entirely.
 - **Strict config.** Unknown keys are errors and all problems are reported together, so a typo like `intervall:` fails at startup instead of being silently ignored.
 
 ## How it works
@@ -25,6 +25,10 @@ It is meant for homelabs, side projects and small teams who want something betwe
 3. Each result is recorded (every sample for 24 hours, plus one aggregate per day for 90 days) and fed to the check's state machine.
 4. When the state machine confirms a transition (up → down or down → up), the alert goes to the check's notifiers in parallel, with retries and exponential backoff.
 5. The status page and `/api/status` read the same in-memory history. The history is saved to disk every minute and on shutdown.
+
+Each service has its own page:
+
+![Detail page of a service during an outage](docs/screenshots/check-detail.png)
 
 ## Architecture
 
@@ -36,7 +40,7 @@ infraping/
 ├── internal/monitor/     Outage state machine and the scheduler that ties everything together
 ├── internal/history/     24h samples + 90 daily aggregates, atomic JSON persistence
 ├── internal/notify/      Telegram, Discord, Slack, ntfy and webhook senders with retries
-├── internal/status/      Status page (embedded HTML template), JSON API, /healthz
+├── internal/status/      Status page and per-service pages (embedded templates, SVG charts), JSON API, /healthz
 ├── examples/             Annotated example configuration
 ├── scripts/              build-release.sh: cross-compiled archives + SHA256SUMS
 ├── worker/               Serverless edition for Cloudflare Workers (TypeScript, cron + D1)
@@ -207,8 +211,9 @@ Common fields: `name` (required, unique), `type`, `interval`, `timeout`, `failur
 
 ### HTTP endpoints (when the status page is enabled)
 
-- `GET /`: the status page. It refreshes itself every minute and follows the system's light or dark theme.
-- `GET /api/status`: the same data as JSON, with CORS open so other sites can embed it.
+- `GET /`: the status page: overall state, every public service with its 90-day bars, and the latest incidents. It refreshes itself every minute, follows the system's light or dark theme and works on phones.
+- `GET /checks/{id}`: one service: uptime over 24 hours, 7, 30 and 90 days, median, 95th percentile and slowest response time, a chart of the last 24 hours with failed checks marked, and its outages. The `id` is the check name in lowercase with dashes (`Public API` → `public-api`).
+- `GET /api/status` and `GET /api/checks/{id}`: the same data as JSON, with CORS open so other sites can embed it.
 - `GET /healthz`: returns `ok`, for the container's or load balancer's own health check.
 
 ## Development
